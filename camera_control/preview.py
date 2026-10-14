@@ -2,6 +2,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Lock, Thread, current_thread
+import time
 
 import cv2
 from PySide6.QtCore import QObject, Signal
@@ -15,6 +16,7 @@ ImageWriter = Callable[[str, object], bool]
 
 # Used only when Windows capability data cannot be matched to the OpenCV stream.
 DEFAULT_RESOLUTION_FALLBACK_CANDIDATES = ((320, 240), (640, 480), (1280, 720), (1920, 1080))
+DEFAULT_FPS_CANDIDATES = (15.0, 24.0, 30.0, 60.0)
 
 
 class PreviewController(QObject):
@@ -30,6 +32,9 @@ class PreviewController(QObject):
     recording_state_changed = Signal(bool)
     resolutions_ready = Signal(object)
     resolution_changed = Signal(object)
+    fps_changed = Signal(object)
+    measured_fps_changed = Signal(float)
+    zoom_changed = Signal(float)
 
     def __init__(
         self,
@@ -38,6 +43,7 @@ class PreviewController(QObject):
         image_writer: ImageWriter | None = None,
         output_root: Path | None = None,
         resolution_candidates: tuple[tuple[int, int], ...] = DEFAULT_RESOLUTION_FALLBACK_CANDIDATES,
+        fps_candidates: tuple[float, ...] = DEFAULT_FPS_CANDIDATES,
     ) -> None:
         super().__init__()
         self._capture_factory = capture_factory or cv2.VideoCapture
@@ -54,6 +60,10 @@ class PreviewController(QObject):
         self._recording_path: Path | None = None
         self._resolution_candidates = resolution_candidates
         self._current_resolution: ResolutionInfo | None = None
+        self._fps_candidates = fps_candidates
+        self._requested_fps: float | None = None
+        self._reported_fps: float | None = None
+        self._zoom = 1.0
 
     @property
     def selected_index(self) -> int | None:
@@ -74,15 +84,38 @@ class PreviewController(QObject):
         with self._lock:
             return self._current_resolution
 
+    @property
+    def requested_fps(self) -> float | None:
+        with self._lock:
+            return self._requested_fps
+
+    @property
+    def reported_fps(self) -> float | None:
+        with self._lock:
+            return self._reported_fps
+
+    @property
+    def zoom(self) -> float:
+        with self._lock:
+            return self._zoom
+
+    @property
+    def fps_candidates(self) -> tuple[float, ...]:
+        return self._fps_candidates
+
     def start(self, index: int) -> None:
         self.stop()
         with self._lock:
             self._latest_frame = None
             self._current_resolution = None
+            self._requested_fps = None
+            self._reported_fps = None
+            self._zoom = 1.0
         self._selected_index = index
         self._stop_event = Event()
         self._thread = Thread(target=self._run, args=(index, self._stop_event,), daemon=True)
         self._thread.start()
+        self.zoom_changed.emit(1.0)
         self.status_changed.emit(f"Starting preview for camera index {index}...")
 
     def stop(self) -> None:
@@ -206,6 +239,58 @@ class PreviewController(QObject):
         self.status_changed.emit(f"Resolution set to {verified.display_name}.")
         return True
 
+    def set_fps(self, fps: float) -> bool:
+        requested = float(fps)
+        if not 1.0 <= requested <= 120.0:
+            self.error.emit("FPS must be between 1 and 120.")
+            return False
+        with self._lock:
+            capture = self._capture
+            if capture is None or not self.is_running:
+                error_message = "FPS requires an active preview."
+                actual = None
+            else:
+                try:
+                    accepted = capture.set(cv2.CAP_PROP_FPS, requested)
+                    actual = self._read_fps(capture)
+                    if accepted is False and actual is None:
+                        error_message = f"Camera rejected {requested:g} FPS."
+                    else:
+                        self._requested_fps = requested
+                        self._reported_fps = actual
+                        error_message = None
+                except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+                    error_message = f"Could not set FPS: {exc}"
+                    actual = None
+        if error_message is not None:
+            self.error.emit(error_message)
+            return False
+        self.fps_changed.emit((requested, actual))
+        self.status_changed.emit(
+            f"Requested {requested:g} FPS; camera reports {actual:g} FPS."
+            if actual is not None
+            else f"Requested {requested:g} FPS; actual FPS is not available."
+        )
+        return True
+
+    def set_zoom(self, zoom: float) -> bool:
+        value = max(1.0, min(4.0, float(zoom)))
+        with self._lock:
+            changed = value != self._zoom
+            self._zoom = value
+        if changed:
+            self.zoom_changed.emit(value)
+        return changed
+
+    def zoom_in(self) -> bool:
+        return self.set_zoom(self.zoom + 0.25)
+
+    def zoom_out(self) -> bool:
+        return self.set_zoom(self.zoom - 0.25)
+
+    def reset_zoom(self) -> bool:
+        return self.set_zoom(1.0)
+
     def _run(self, index: int, stop_event: Event) -> None:
         capture = None
         try:
@@ -226,7 +311,13 @@ class PreviewController(QObject):
                 self._latest_frame = frame.copy()
                 self._current_resolution = current
                 verified = self._probe_resolutions_locked(capture, current)
+                reported_fps = self._read_fps(capture)
+                self._reported_fps = reported_fps
             self.resolutions_ready.emit(tuple(verified))
+            if reported_fps is not None:
+                self.fps_changed.emit((self._requested_fps, reported_fps))
+            measured_started = time.monotonic()
+            measured_frames = 0
             while not stop_event.is_set():
                 with self._lock:
                     returned, frame = capture.read()
@@ -243,9 +334,19 @@ class PreviewController(QObject):
                             writer.write(frame)
                         except Exception as exc:
                             write_error = f"Could not write recording: {exc}"
+                    zoom = self._zoom
+                measured_frames += 1
+                elapsed = time.monotonic() - measured_started
+                if elapsed >= 1.0:
+                    measured = measured_frames / elapsed
+                    with self._lock:
+                        self._reported_fps = measured
+                    self.measured_fps_changed.emit(measured)
+                    measured_started = time.monotonic()
+                    measured_frames = 0
                 if write_error is not None:
                     self._stop_recording_after_error(write_error)
-                self.frame_ready.emit(self._to_qimage(frame))
+                self.frame_ready.emit(self._to_qimage(frame, zoom))
         except Exception as exc:
             self.error.emit(f"Could not start camera index {index}: {exc}")
         finally:
@@ -321,15 +422,26 @@ class PreviewController(QObject):
         return cv2.VideoWriter(path, fourcc, fps, size)
 
     @staticmethod
-    def _capture_fps(capture: object) -> float:
+    def _read_fps(capture: object) -> float | None:
         try:
             fps = float(capture.get(cv2.CAP_PROP_FPS))
         except (AttributeError, TypeError, ValueError):
-            fps = 0.0
-        return fps if 1.0 <= fps <= 60.0 else 20.0
+            return None
+        return fps if 1.0 <= fps <= 120.0 else None
+
+    @classmethod
+    def _capture_fps(cls, capture: object) -> float:
+        return cls._read_fps(capture) or 20.0
 
     @staticmethod
-    def _to_qimage(frame: object) -> QImage:
+    def _to_qimage(frame: object, zoom: float = 1.0) -> QImage:
+        if zoom > 1.0:
+            height, width = frame.shape[:2]
+            crop_width = max(1, int(width / zoom))
+            crop_height = max(1, int(height / zoom))
+            left = (width - crop_width) // 2
+            top = (height - crop_height) // 2
+            frame = frame[top : top + crop_height, left : left + crop_width]
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         height, width, channels = rgb_frame.shape
         return QImage(

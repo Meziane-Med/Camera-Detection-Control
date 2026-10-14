@@ -1,9 +1,16 @@
-# Windows Camera Control
+# Windows Peripheral and Camera Control
 
 This is the final Windows 10/11 camera-control application delivery.
 It detects cameras with a bounded OpenCV index probe, previews only the camera
 explicitly selected in the UI, and captures photos or recordings from that same
 preview stream.
+
+The application also includes a **Peripheral Detection** tab. It uses the
+read-only Windows `Get-PnpDevice` command through PowerShell to enumerate
+devices exposed by Plug and Play, then classifies the returned records as
+input, output, or input/output devices. Windows may omit devices or properties
+depending on drivers, permissions, and device state; the application displays
+unknown values as `Not available` and does not claim exhaustive detection.
 
 ## Requirements
 
@@ -45,6 +52,26 @@ The Resolution selector tests a bounded candidate list (320x240, 640x480,
 reliably enumerate every Windows camera mode, so a listed resolution is only
 shown after verification on the active camera. The camera's current resolution
 is restored after probing, and resolution changes are disabled during recording.
+
+The FPS selector requests a bounded candidate value (15, 24, 30, or 60 FPS)
+through OpenCV and reads back the camera's reported value when available. The
+interface also reports a measured frame rate from the active preview stream.
+Camera drivers may ignore FPS requests, return inaccurate metadata, or expose
+no reliable value; in those cases the application reports that information as
+unavailable rather than treating the request as guaranteed.
+
+Zoom controls provide **software preview zoom** from 1.00x to 4.00x by
+center-cropping and scaling the displayed preview. This does not change the
+camera's optical or hardware zoom, and recordings continue to use the original
+camera frames rather than the cropped preview.
+
+Select **Peripheral Detection** to filter **All Devices**, **Input Devices**,
+**Output Devices**, or **Input/Output Devices**. Select a device to inspect
+the name, category, manufacturer, status, instance ID, class, driver,
+connection, presence, and other properties Windows returned. Use **Refresh
+devices** to run discovery again. A USB label alone does not classify a
+device as input/output; storage and touch devices receive that classification
+only when their class or descriptive metadata supports it.
 
 The index scan is an initial fallback and does not guarantee discovery of every
 Windows camera. Windows capability discovery reports device IDs and advertised
@@ -97,7 +124,9 @@ computer and camera.
 - MP4 recording and finalization under `recordings\`.
 - Resolution changes verified from actual frames, including restoration.
 - Windows device ID discovery through PyWinRT when the driver exposes it.
-- Safe handling of unknown FPS and zoom support.
+- FPS request/readback and measured preview FPS reporting where available.
+- Bounded software preview zoom, clearly separate from hardware zoom.
+- Windows Plug and Play peripheral enumeration and category filtering.
 
 ## Troubleshooting
 

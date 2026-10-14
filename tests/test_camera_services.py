@@ -98,6 +98,21 @@ class ResolutionCapture(FakeCapture):
         return True, np.zeros((self.height, self.width, 3), dtype=np.uint8)
 
 
+class FpsCapture(ResolutionCapture):
+    def __init__(self, index: int) -> None:
+        super().__init__(index, {(640, 480)})
+        self.fps = 30.0
+
+    def set(self, property_id: int, value: float) -> bool:
+        if property_id == 5:
+            self.fps = float(value)
+            return True
+        return super().set(property_id, value)
+
+    def get(self, property_id: int) -> float:
+        return self.fps if property_id == 5 else super().get(property_id)
+
+
 class FakeWriter:
     def __init__(self, opened: bool = True, fail_write: bool = False, fail_release: bool = False) -> None:
         self.opened = opened
@@ -246,6 +261,34 @@ class CameraServiceTests(unittest.TestCase):
         self.assertFalse(controller.set_resolution(800, 600))
         self.assertEqual((controller.current_resolution.width, controller.current_resolution.height), (1280, 720))
         controller.stop()
+
+    def test_fps_request_reads_back_camera_value(self) -> None:
+        controller = PreviewController(
+            capture_factory=lambda index: FpsCapture(index),
+            resolution_candidates=((640, 480),),
+        )
+        controller.start(0)
+        deadline = time.monotonic() + 2
+        while not controller.is_running and time.monotonic() < deadline:
+            time.sleep(0.01)
+        while controller.current_resolution is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        self.assertTrue(controller.set_fps(24))
+        self.assertEqual(controller.requested_fps, 24)
+        self.assertEqual(controller.reported_fps, 24)
+        controller.stop()
+
+    def test_software_zoom_is_bounded_and_resettable(self) -> None:
+        controller = PreviewController()
+        self.assertFalse(controller.zoom_in() is False)
+        self.assertEqual(controller.zoom, 1.25)
+        controller.set_zoom(99)
+        self.assertEqual(controller.zoom, 4.0)
+        controller.set_zoom(0)
+        self.assertEqual(controller.zoom, 1.0)
+        controller.zoom_out()
+        self.assertEqual(controller.zoom, 1.0)
 
     def test_discovery_leaves_camera_unselected_until_user_action(self) -> None:
         window = MainWindow.__new__(MainWindow)
