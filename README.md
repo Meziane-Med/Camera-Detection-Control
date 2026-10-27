@@ -54,6 +54,14 @@ uses the existing preview stream and saves finalized MP4 files under
 `recordings/`. Use **Stop Recording**, **Stop preview**, or close the window to
 finalize the current recording and release the selected camera.
 
+The Frame Rate setting leaves preview output uncapped by default, or caps its
+output cadence at 15, 24, 30, or 60 FPS. The Zoom slider provides digital zoom
+from 1x to 4x; double-click a point in the preview to zoom in around that
+point. Return the slider to 1x to restore the full frame. Zoom is digital
+rather than optical and is also applied to photos and recordings from the
+preview stream. The FPS cap affects output cadence, not the camera's sensor
+capture rate.
+
 Recording uses the selected camera's reported FPS when it is within a practical
 range, otherwise it uses a 20 FPS fallback. The actual preview frame dimensions
 are used for the writer. Only one recording can be active at a time.
