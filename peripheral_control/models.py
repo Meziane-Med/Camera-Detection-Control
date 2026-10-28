@@ -7,6 +7,7 @@ class DeviceCategory(Enum):
     INPUT = "Input Devices"
     OUTPUT = "Output Devices"
     INPUT_OUTPUT = "Input/Output Devices"
+    STORAGE = "Storage Devices"
 
 
 @dataclass(frozen=True)

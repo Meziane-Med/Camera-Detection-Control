@@ -9,7 +9,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton
 
 from camera_control.discovery import CameraDiscovery
-from camera_control.app import MainWindow
+from camera_control.page import CameraPage
 from camera_control.models import CameraInfo, DiscoveryReport, IdentityConfidence
 from camera_control.preview import PreviewController
 from camera_control.windows_capabilities import WindowsCameraCapabilityProvider
@@ -291,14 +291,14 @@ class CameraServiceTests(unittest.TestCase):
         self.assertEqual(controller.zoom, 1.0)
 
     def test_discovery_leaves_camera_unselected_until_user_action(self) -> None:
-        window = MainWindow.__new__(MainWindow)
+        window = CameraPage.__new__(CameraPage)
         window._camera_combo = QComboBox()
         window._refresh_button = QPushButton()
         window._stop_button = QPushButton()
         window._stop_button.setEnabled(False)
         window._status_label = QLabel()
 
-        MainWindow._discovery_finished(
+        CameraPage._discovery_finished(
             window,
             DiscoveryReport(cameras=(CameraInfo(index=0),)),
         )
@@ -307,19 +307,23 @@ class CameraServiceTests(unittest.TestCase):
         self.assertFalse(window._stop_button.isEnabled())
 
     def test_resolution_list_selects_initial_verified_mode(self) -> None:
-        window = MainWindow.__new__(MainWindow)
+        window = CameraPage.__new__(CameraPage)
         window._resolution_combo = QComboBox()
+        window._info = {}
+        window._info_label = QLabel()
         window._preview = type(
             "PreviewStub",
             (),
             {
-                "current_resolution": type("ResolutionStub", (), {"width": 640, "height": 480})(),
+                "current_resolution": type(
+                    "ResolutionStub", (), {"width": 640, "height": 480, "display_name": "640 x 480"}
+                )(),
                 "is_running": True,
                 "is_recording": False,
             },
         )()
 
-        MainWindow._resolutions_ready(
+        CameraPage._resolutions_ready(
             window,
             (type("ResolutionStub", (), {"width": 640, "height": 480, "display_name": "640 x 480"})(),),
         )
@@ -327,11 +331,22 @@ class CameraServiceTests(unittest.TestCase):
         self.assertEqual(window._resolution_combo.currentText(), "640 x 480")
 
     def test_resolution_index_normalizes_qt_item_data(self) -> None:
-        window = MainWindow.__new__(MainWindow)
+        window = CameraPage.__new__(CameraPage)
         window._resolution_combo = QComboBox()
         window._resolution_combo.addItem("320 x 240", [320, 240])
 
         self.assertEqual(window._resolution_index(320, 240), 0)
+
+    def test_reported_fps_without_request_updates_info(self) -> None:
+        window = CameraPage.__new__(CameraPage)
+        window._info = {}
+        window._info_label = QLabel()
+
+        CameraPage._fps_changed(window, (None, 30.0))
+        self.assertEqual(window._info["FPS"], "30")
+
+        CameraPage._fps_changed(window, (24.0, 25.0))
+        self.assertEqual(window._info["FPS"], "25 (requested 24)")
 
     def test_windows_provider_extracts_devices_profiles_and_deduplicates_media_types(self) -> None:
         devices = [{"id": "device-a", "name": "Built-in webcam", "is_enabled": True}, {"id": "device-b", "name": "USB webcam"}]
