@@ -21,7 +21,6 @@ class PeripheralDiscovery:
     """Read-only discovery through Windows' built-in PnP device provider."""
 
     _SCRIPT = (
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
         "Get-PnpDevice -ErrorAction Stop | "
         "Select-Object Status,Class,InstanceId,FriendlyName,Manufacturer,"
         "Present,DriverProviderName,DriverVersion,LocationInfo,Service,HardwareID | "
@@ -55,17 +54,15 @@ class PeripheralDiscovery:
             return PeripheralDiscoveryReport((), (f"Could not start Windows device discovery: {exc}",))
         except subprocess.SubprocessError as exc:
             return PeripheralDiscoveryReport((), (f"Windows device discovery failed: {exc}",))
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
         if completed.returncode != 0:
-            error = stderr.strip()
+            error = completed.stderr.strip()
             if "get-pnpdevice" in error.lower() and "not recognized" in error.lower():
                 message = "Windows PowerShell cannot access Get-PnpDevice on this system."
             else:
                 message = error or "Windows device discovery failed."
             return PeripheralDiscoveryReport((), (message,))
         try:
-            payload: Any = json.loads(stdout) if stdout.strip() else []
+            payload: Any = json.loads(completed.stdout) if completed.stdout.strip() else []
         except json.JSONDecodeError as exc:
             return PeripheralDiscoveryReport((), (f"Windows device discovery returned invalid data: {exc}",))
         rows = payload if isinstance(payload, list) else [payload]
@@ -79,13 +76,8 @@ class PeripheralDiscovery:
     def _run_powershell(script: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=30,
             check=False,
-            # The packaged app has no console; keep PowerShell from opening one.
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )

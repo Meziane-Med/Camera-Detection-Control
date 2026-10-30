@@ -1,3 +1,3 @@
-"""Windows camera preview, capture and peripheral detection desktop app."""
+"""Initial camera detection and preview foundation."""
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"

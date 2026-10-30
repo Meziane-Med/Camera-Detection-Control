@@ -31,12 +31,11 @@ def classify_device(device: PeripheralDevice) -> tuple[DeviceCategory, ...]:
         if DeviceCategory.OUTPUT not in categories:
             categories.append(DeviceCategory.OUTPUT)
 
-    storage_classes = {"diskdrive", "volume", "wpd", "portabledevices", "scsiadapter", "hdc"}
+    storage_classes = {"diskdrive", "volume", "w storage", "portabledevices"}
     if device_class in storage_classes or any(
-        word in text
-        for word in ("mass storage", "usb storage", "usbstor", "uaspstor", "flash drive", "external hard")
+        word in text for word in ("mass storage", "usb storage", "flash drive", "external hard")
     ):
-        categories.append(DeviceCategory.STORAGE)
+        categories.append(DeviceCategory.INPUT_OUTPUT)
     if device_class == "hidclass" and any(
         word in text for word in ("touchscreen", "touch screen", "touchpad", "digitizer")
     ):

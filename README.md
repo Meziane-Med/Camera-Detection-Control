@@ -1,203 +1,148 @@
-# Device Control
+# Windows Peripheral and Camera Control
 
-**Camera preview, capture and peripheral detection for Windows 10/11.**
+This is the final Windows 10/11 camera-control application delivery.
+It detects cameras with a bounded OpenCV index probe, previews only the camera
+explicitly selected in the UI, and captures photos or recordings from that same
+preview stream.
 
-Device Control is a desktop application built with Python, PySide6 (Qt) and
-OpenCV. It previews a webcam, takes photos and records video, and lists the
-input, output and storage devices that Windows reports through Plug and Play.
+The application also includes a **Peripheral Detection** tab. It uses the
+read-only Windows `Get-PnpDevice` command through PowerShell to enumerate
+devices exposed by Plug and Play, then classifies the returned records as
+input, output, or input/output devices. Windows may omit devices or properties
+depending on drivers, permissions, and device state; the application displays
+unknown values as `Not available` and does not claim exhaustive detection.
 
-![Version](https://img.shields.io/badge/version-1.0.0-4f7cff)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4)
-![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
+## Requirements
 
----
-
-## Contents
-
-- [Features](#features)
-- [Quick start (executable)](#quick-start-executable)
-- [Run from source](#run-from-source)
-- [Using the application](#using-the-application)
-- [Build the executable](#build-the-executable)
-- [Project structure](#project-structure)
-- [Testing](#testing)
-- [Design notes and limitations](#design-notes-and-limitations)
-- [Troubleshooting](#troubleshooting)
-
-## Features
-
-### Camera
-
-| Feature | Details |
-| --- | --- |
-| Camera detection | Probes OpenCV indexes 0–4 in a background thread, so the UI never freezes |
-| Live preview | Starts only after you select a camera; stops cleanly and releases the device |
-| Photo capture | Saves the latest preview frame as JPEG under `captures\` |
-| Video recording | Records MP4 from the live stream under `recordings\`; one recording at a time |
-| Resolution | Offers only modes verified on the active camera (320×240, 640×480, 1280×720, 1920×1080 tested) |
-| Frame rate | Requests 15, 24, 30 or 60 FPS and shows both the camera-reported and measured FPS |
-| Zoom | Software preview zoom from 1.00× to 4.00× in 0.25× steps |
-
-### Peripherals
-
-| Feature | Details |
-| --- | --- |
-| Device discovery | Read-only query of Windows Plug and Play (`Get-PnpDevice`) |
-| Classification | Input, Output, Input/Output and Storage categories |
-| Filtering | Category filter, text search, and a *Connected only* toggle |
-| Details view | Name, category, manufacturer, status, device ID, class, driver, connection and more |
-
-## Quick start (executable)
-
-No Python installation is required.
-
-1. Copy `DeviceControl-1.0.0.exe` to any folder.
-2. Double-click it. The first launch takes a few seconds while the bundle unpacks.
-3. If no camera appears, allow camera access for desktop apps in
-   **Settings → Privacy & security → Camera**.
-
-Photos and recordings are saved in `captures\` and `recordings\` inside the
-folder the application is started from.
-
-## Run from source
-
-### Requirements
-
-- Windows 10 or Windows 11
 - Python 3.10 or newer
-- A webcam (optional, for the camera page)
+- Windows 10 or Windows 11
+- The packages listed in `requirements.txt`
+- `build-requirements.txt` when building the executable
 
-### Install
+Install dependencies in a virtual environment when setting up a new checkout:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### Launch
+The existing environment already has compatible OpenCV and PySide6 installations;
+the commands above are instructions only and are not run by the application.
+
+## Run
 
 ```powershell
-python -m camera_control
+.\.venv\Scripts\python.exe -m camera_control
 ```
 
-## Using the application
+The application probes a bounded range of OpenCV camera indexes in a worker
+thread. Select a detected index from the dropdown to start preview. **Take
+Photo** saves the latest preview frame under `captures/`. **Start Recording**
+uses the existing preview stream and saves finalized MP4 files under
+`recordings/`. Use **Stop Recording**, **Stop preview**, or close the window to
+finalize the current recording and release the selected camera.
 
-The window has a sidebar with two pages.
+Recording uses the selected camera's reported FPS when it is within a practical
+range, otherwise it uses a 20 FPS fallback. The actual preview frame dimensions
+are used for the writer. Only one recording can be active at a time.
 
-### Camera page
+The Resolution selector tests a bounded candidate list (320x240, 640x480,
+1280x720, and 1920x1080) using actual returned frame dimensions. OpenCV cannot
+reliably enumerate every Windows camera mode, so a listed resolution is only
+shown after verification on the active camera. The camera's current resolution
+is restored after probing, and resolution changes are disabled during recording.
 
-1. Wait for detection to finish, then pick a camera from the dropdown at the
-   top right. The preview starts immediately.
-2. **Take photo** saves the current frame.
-3. **Record** starts a recording; the button turns red and reads
-   **Stop recording**. Click it again to finalize the MP4 file.
-4. Use **Resolution**, **FPS** and the **− / + / 1x** zoom buttons in the
-   toolbar. The information line below shows the active resolution, FPS and zoom.
-5. **Stop** ends the preview and releases the camera. **Refresh** runs
-   detection again.
+The FPS selector requests a bounded candidate value (15, 24, 30, or 60 FPS)
+through OpenCV and reads back the camera's reported value when available. The
+interface also reports a measured frame rate from the active preview stream.
+Camera drivers may ignore FPS requests, return inaccurate metadata, or expose
+no reliable value; in those cases the application reports that information as
+unavailable rather than treating the request as guaranteed.
 
-Resolution changes are disabled while recording. Closing the window finalizes
-any active recording and releases the camera.
+Zoom controls provide **software preview zoom** from 1.00x to 4.00x by
+center-cropping and scaling the displayed preview. This does not change the
+camera's optical or hardware zoom, and recordings continue to use the original
+camera frames rather than the cropped preview.
 
-### Peripherals page
+Select **Peripheral Detection** to filter **All Devices**, **Input Devices**,
+**Output Devices**, or **Input/Output Devices**. Select a device to inspect
+the name, category, manufacturer, status, instance ID, class, driver,
+connection, presence, and other properties Windows returned. Use **Refresh
+devices** to run discovery again. A USB label alone does not classify a
+device as input/output; storage and touch devices receive that classification
+only when their class or descriptive metadata supports it.
 
-Devices load the first time the page is opened (this takes a few seconds).
-Use the search box, the category filter and **Connected only** to narrow the
-list, then select a device to see everything Windows returned about it.
-Values Windows does not provide are shown as *Not available*. **Refresh**
-runs discovery again.
+The index scan is an initial fallback and does not guarantee discovery of every
+Windows camera. Windows capability discovery reports device IDs and advertised
+profiles when the driver exposes them, but it does not claim that a Windows ID
+matches an OpenCV numeric index. The active OpenCV stream therefore verifies
+resolution changes from actual frames.
 
-## Build the executable
+On Windows, the discovery worker also queries PyWinRT's
+`DeviceInformation.FindAllAsync(DeviceClass.VideoCapture)` and, when supported,
+`MediaCapture.FindAllVideoProfiles`. These results contain Windows device IDs
+and advertised media descriptions. They are deliberately not matched to
+OpenCV numeric indexes yet, so the UI continues using actual frame verification
+for resolution choices rather than presenting another device's advertised modes.
+The fixed OpenCV candidate list is therefore only a fallback for unresolved
+identity, not the authoritative Windows capability list. FPS and zoom controls
+remain unavailable unless support is exposed by the device/backend and verified
+in the active stream. A reported FPS value is not treated as a guaranteed
+control mode, and an unavailable zoom property remains unknown rather than
+being declared unsupported hardware.
+
+## Build the Windows executable
+
+Install the build-only dependency into the workspace environment:
 
 ```powershell
-python -m pip install -r requirements.txt -r build-requirements.txt
-python -m PyInstaller --clean --noconfirm camera_control.spec
+.\.venv\Scripts\python.exe -m pip install -r build-requirements.txt
 ```
 
-The output is `dist\DeviceControl-<version>.exe`: a single-file, windowed
-executable (no console) with Windows version information embedded in its file
-properties.
-
-The version is defined once, in `camera_control/__init__.py`
-(`__version__`). The spec file reads it for both the file name and the
-embedded metadata, and the application shows it at the bottom of the sidebar.
-To release a new version, change that value and rebuild.
-
-## Project structure
-
-```
-tp-system/
-├── camera_control/            Camera page and application entry point
-│   ├── app.py                 Main window: sidebar navigation and page stack
-│   ├── page.py                Camera page UI
-│   ├── preview.py             Preview thread, capture, recording, resolution/FPS/zoom
-│   ├── discovery.py           Bounded OpenCV camera index probe
-│   ├── windows_capabilities.py  Windows device and media-profile discovery (PyWinRT)
-│   └── models.py              Camera data models
-├── peripheral_control/        Peripherals page
-│   ├── ui.py                  Device list, filters and details view
-│   ├── discovery.py           Get-PnpDevice query through PowerShell
-│   ├── classification.py      Input / output / storage classification rules
-│   └── models.py              Device data models
-├── shared/                    Code used by both pages
-│   ├── theme.py               Colour tokens and Qt stylesheet
-│   ├── widgets.py             Button, label, card and page-header helpers
-│   └── tasks.py               Run blocking work off the UI thread
-├── tests/                     Unit tests
-├── run_camera_control.py      Executable entry script
-├── camera_control.spec        PyInstaller build configuration
-├── requirements.txt           Runtime dependencies
-└── build-requirements.txt     Build-only dependencies
-```
-
-## Testing
+Build from the repository root:
 
 ```powershell
-python -m unittest discover -s tests -v
+.\.venv\Scripts\pyinstaller.exe --clean --noconfirm camera_control.spec
 ```
 
-The suite covers camera discovery, preview start/stop, photo and recording
-(including writer failures), resolution verification and restoration, FPS
-readback, zoom bounds, Windows capability parsing, peripheral parsing,
-classification, de-duplication and the peripheral page filters. Tests use
-fake cameras and fake PowerShell output, so no hardware is required.
+The executable is created at `dist\WindowsCameraControl.exe`. Launch it with:
 
-## Design notes and limitations
+```powershell
+.\dist\WindowsCameraControl.exe
+```
 
-- **Camera detection is bounded.** OpenCV cannot enumerate Windows cameras by
-  name, so the application probes indexes 0–4. A camera at a higher index, or
-  one in use by another application, may not appear.
-- **Resolutions are verified, not assumed.** Each candidate is applied and
-  kept only if the camera returns frames of that exact size. The original
-  resolution is restored after probing.
-- **FPS is a request.** Drivers may ignore it. The application shows the value
-  the camera reports and the frame rate actually measured from the stream.
-- **Zoom is digital.** It crops and scales the preview only; it does not drive
-  optical or hardware zoom, and recordings keep the full camera frame.
-- **Windows device IDs are not matched to OpenCV indexes.** PyWinRT discovery
-  reports device IDs and advertised profiles when the driver exposes them,
-  but the actual preview frames remain the authority for what the camera does.
-- **Peripheral detection reflects what Windows reports.** Results depend on
-  drivers, permissions and device state, and are not guaranteed to be
-  exhaustive. A USB connection alone does not make a device *Input/Output*;
-  classification is based on the device class and its description.
+The build was verified on this Windows 11 machine only. Camera permissions,
+drivers, supported resolutions, FPS behavior, and hardware controls vary by
+computer and camera.
+
+## Verified features
+
+- Camera discovery and selection.
+- Live preview through OpenCV MSMF on the test machine.
+- JPEG photo capture under `captures\`.
+- MP4 recording and finalization under `recordings\`.
+- Resolution changes verified from actual frames, including restoration.
+- Windows device ID discovery through PyWinRT when the driver exposes it.
+- FPS request/readback and measured preview FPS reporting where available.
+- Bounded software preview zoom, clearly separate from hardware zoom.
+- Windows Plug and Play peripheral enumeration and category filtering.
 
 ## Troubleshooting
 
-| Symptom | What to check |
-| --- | --- |
-| No camera detected | Camera privacy settings for desktop apps; close other apps using the camera; click **Refresh** |
-| Preview is black or stops | Another application may have taken the camera; select it again |
-| A resolution is missing | The camera did not return frames at that size, so it is not offered |
-| FPS differs from the request | The driver ignored or adjusted the request; the measured value is the real rate |
-| Peripheral list is empty or times out | PowerShell must be available; click **Refresh** to retry |
-| Exe is slow to start | Normal for a single-file build: it unpacks to a temporary folder first |
+- If no camera appears, check Windows camera privacy permissions and whether
+	 another application is using the camera.
+- OpenCV index discovery is bounded and may not find every Windows camera.
+- A Windows device ID is not automatically treated as an exact OpenCV index
+	 match.
+- Advertised profiles are metadata; actual preview dimensions and measured FPS
+	remain the runtime authority.
+- MSMF may print warnings when unsupported resolution candidates are probed.
+- If the executable reports missing camera access, enable camera access for
+	 desktop applications in Windows Privacy settings and relaunch it.
 
-Messages such as `CvCapture_MSMF::initStream` or `obsensor ... out of range`
-in a terminal when running from source are OpenCV diagnostics printed while
-probing indexes and resolutions. They are expected and harmless.
+## Tests
 
----
-
-Version 1.0.0 · Verified on Windows 11 with Python 3.13 and PyInstaller 6.22.3.
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```

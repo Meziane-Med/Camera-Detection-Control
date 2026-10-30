@@ -33,7 +33,7 @@ class PeripheralServiceTests(unittest.TestCase):
         unknown_usb = device(InstanceId="USB\\OTHER", FriendlyName="USB Adapter", Class="USB")
 
         self.assertIn(DeviceCategory.INPUT_OUTPUT, touchscreen.categories)
-        self.assertIn(DeviceCategory.STORAGE, storage.categories)
+        self.assertIn(DeviceCategory.INPUT_OUTPUT, storage.categories)
         self.assertEqual(unknown_usb.categories, ())
 
     def test_keeps_input_and_output_categories(self):
@@ -117,6 +117,10 @@ class PeripheralServiceTests(unittest.TestCase):
                 return PeripheralDiscoveryReport((keyboard, monitor))
 
         panel = PeripheralPanel(FakeDiscovery())
+        panel._thread.quit()
+        panel._thread.wait()
+        panel._thread = None
+        panel._worker = None
         panel._devices = (keyboard, monitor)
         panel._refresh_list()
         self.assertEqual(panel._list.count(), 2)
